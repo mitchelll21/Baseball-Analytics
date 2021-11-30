@@ -1,0 +1,109 @@
+---
+title: "Bases and Trackman Code"
+output:
+  html_document:
+    df_print: paged
+---
+### load libraries
+```{r message=FALSE, warning=FALSE}
+library(devtools)
+#devtools::install_github("BillPetti/baseballr")
+library(baseballr)
+library(dplyr)
+library(tidyverse)
+library(stringr)
+library(janitor)
+```
+
+### base function
+```{r message=FALSE, warning=FALSE}
+base_position <- function(x) {
+  library(dplyr)
+  library(stringr)
+  
+  firstwords <- c('walked', 'singled', 'reached', 'on first', 'hit by pitch')
+secondwords <- c('advanced to second', 'doubled', 'stole second', 'on second')
+thirdwords <- c('advanced to third', 'tripled', 'stole third', 'on third')
+base_words <- c('walked', 'singled', 'reached', 'on first', 'advanced to second', 'doubled', 'stole second', 'on second','advanced to third', 'tripled', 'stole third', 'on third')
+steal_sec_words <- c('stole second', 'advanced to second on a wild pitch')
+steal_three_words <- c('stole third', 'advanced to third on a wild pitch', 'advanced to third')
+
+  for (i in 1:length(x)){
+  y <- x %>%
+    mutate(Runner_on_first = if_else(str_detect(description, paste(firstwords, collapse = '|')), 1, 0),
+         Runner_on_second = if_else(str_detect(description, paste(secondwords, collapse = '|')), 1, ifelse(str_detect(lag(description, 1), paste(steal_sec_words, collapse = '|')), 1, 0)),
+         Runner_on_third = ifelse(str_detect(description, paste(thirdwords, collapse = '|')), 1, ifelse(str_detect(description, 'out at third'), 0, ifelse(str_detect(lag(description, 1), paste(steal_three_words, collapse = '|')), 1, 0))), 
+         bases = paste(Runner_on_first, Runner_on_second, Runner_on_third, sep = ''))
+  }
+  
+  for (bases in y){
+  z <- y %>%
+         mutate(new_bases = ifelse(str_detect(lag(description, 1), paste(base_words, collapse = '|')), paste(lag(bases, 1)), '000'),
+                new_2 = ifelse(bases != new_bases, ifelse(str_detect(description, paste(base_words, collapse = '|')), bases, new_bases), bases))
+  }
+  
+  z <- z %>%
+    select(-Runner_on_first, -Runner_on_second, -Runner_on_third, -bases, -new_bases) %>%
+  rename(bases = new_2)
+    
+  return(z)
+}
+ 
+
+```
+
+### trackman function
+```{r message=FALSE, warning=FALSE}
+
+tm_merge <- function(tm, team,  bases) {
+  library(dplyr)
+  library(stringr)
+
+  tm2<- tm %>%
+  filter(HomeTeamName == team | AwayTeamName == team) %>%
+  mutate(Date = as.Date(Date, '%m/%d/%y'),
+         Date = as.character(Date)) %>%
+   group_by(PlayID) %>%
+  mutate(ID = cur_group_id())
+
+ new_bases <- bases %>%
+  mutate(Date = as.Date(date, '%m/%d/%Y'),
+         Date = as.character(Date)) %>%
+  filter(Date %in% tm2$Date) 
+
+new_bases$ID <- 1:nrow(new_bases)
+
+finaltm <- new_bases %>%
+  merge(tm2, by = 'ID')
+return(finaltm)
+}
+
+```
+
+### two functions merged
+```{r}
+
+bases_tm_merge <- function(tm, school, df){
+  y <- base_position(df)
+  z <- tm_merge(tm, school, y)
+  return(z)
+}
+
+```
+
+
+### school info function
+this is to clean data pulled from NCAA website using baseballr package by Bill Petti
+```{r}
+school_info <- function(x){
+  pbp <- list()
+for (i in 1:nrow(x)) {
+  pbp[[i]] <- get_ncaa_baseball_pbp(x$game_info_url[i])
+}
+y = plyr::ldply(pbp,data.frame)
+ return(y)
+}
+```
+
+
+These functions when used together are the first step in preparing data for the Runs Value Matrix
