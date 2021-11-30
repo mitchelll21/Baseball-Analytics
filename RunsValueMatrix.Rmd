@@ -1,0 +1,152 @@
+---
+title: "Runs Value Matrix"
+name: Lilly Mitchell
+output: html_document
+
+---
+
+
+# The Goal:
+#### The purpose of these functions are to take play by play descriptions and plot base runner positions as a result. Once the bases are properly plotted, the data is then merged with TrackMan data to generate a large data set to be used to create a runs value matrix and other products. For this project, we focused on Wake Forest's conference, the ACC, and the SEC due to high levels of competition and quality data. Ultimately, this data will have immediate impact on game day decisions while being replicable for years to come.
+
+### Import Data
+```{r message=FALSE, warning=FALSE}
+all_data <- read_csv('')
+
+```
+
+
+### load libraries
+```{r message=FALSE, warning=FALSE}
+library(devtools)
+#devtools::install_github("BillPetti/baseballr")
+library(baseballr)
+library(dplyr)
+library(tidyverse)
+library(stringr)
+library(janitor)
+```
+
+### Prep Data
+```{r message=FALSE, warning=FALSE}
+all_2018 <- all_2018 %>%
+ select(GameID, PlayID, inning, inning_top_bot, description, bases, score, BatterTeam, RunsScored)%>%
+  distinct(description, .keep_all = TRUE)
+
+all_2018[!grepl(paste(subwords, collapse = '|'), all_2018$description),] -> small18
+
+new_rvm <- small18 %>%
+  mutate(Away_Score = sub("-.*", "", score),
+         Home_Score = sub(".*-", "", score)) %>%
+  group_by(GameID, inning, inning_top_bot) %>%
+  arrange(PlayID) %>%
+  mutate(HalfID = cur_group_id()) %>%
+  ungroup() %>%
+  distinct(description, .keep_all = TRUE) %>%
+  mutate(runs = as.numeric(Away_Score) + as.numeric(Home_Score))
+
+
+new_rvm %>%
+  mutate(eoi = ifelse(HalfID != lag(HalfID, 1), 'Top of Inning',
+                      ifelse(HalfID != lead(HalfID, 1), 'End of Inning', 'During Inning'))) -> add_inn
+```
+
+### Get Outs
+
+```{r message=FALSE, warning=FALSE}
+
+one_out_words <- c('out', 'popped', 'infield fly')
+two_outs <- c('double play')
+three_outs <- c('triple play')
+
+add_inn %>%
+  mutate(outs_from_play = ifelse(str_detect(description, paste(one_out_words, collapse = '|')), 1, 0)) -> outs
+
+outs %>%
+  mutate(outs_from_play = ifelse(str_detect(description, paste(two_outs, collapse = '|')), 2, outs_from_play)) -> outs
+
+
+outs %>%
+  mutate(outs_from_play = ifelse(str_detect(description, paste(three_outs, collapse = '|')), 3, outs_from_play)) -> outs
+
+
+
+outs %>%
+  group_by(HalfID) %>%
+  mutate(outs = outs_from_play,
+    outs = ifelse(eoi == 'Top of Inning', outs_from_play,
+         ifelse(str_detect(description, paste(one_out_words, collapse = '|')), lag(as.numeric(outs_from_play))+1, 
+                ifelse(str_detect(description, paste(two_outs, collapse = '|')), lag(as.numeric(outs_from_play))+2, lag(as.numeric(outs))))),
+    outs = ifelse(outs_from_play == 0 & lag(outs) > 0, lag(outs), outs)) -> outs2
+
+outs2 %>%
+  mutate(outs = ifelse(eoi == 'Top of Inning' & str_detect(description, 'out'), 1,
+                       ifelse(eoi == 'Top of Inning', 0, outs))) -> outs3
+  
+       
+# outs isn't perfect but its pretty close
+```
+
+### Calculate Runs
+```{r message=FALSE, warning=FALSE}
+
+outs3 %>%
+  mutate(Away_Score = as.numeric(Away_Score), Home_Score = as.numeric(Home_Score)) %>%
+  group_by(HalfID) %>%
+  mutate(total_score = ifelse(inning_top_bot == 'top', Away_Score, Home_Score)) %>%
+  ungroup() %>%
+  group_by(HalfID) %>%
+  arrange(PlayID) %>%
+  mutate(runs_scored_on_play = ifelse(str_detect(description, 'scored'), total_score - lag(total_score), 0)) %>%
+  filter(runs_scored_on_play >= 0, runs_scored_on_play <= 4) %>%
+  na.omit() -> run_fix
+
+```
+
+there are a few instances removed because of incorrect labeling in the data that would be hard to fix on our end... about 33 instances were removed
+
+### BUILD THE MATRIX
+
+```{r message=FALSE, warning=FALSE}
+calc_roi_diff <- run_fix %>%
+  group_by(HalfID) %>%
+  arrange(PlayID) %>%
+  mutate(runs_eoi = sum(runs_scored_on_play),
+         runs_roi = ifelse(eoi == 'End of Inning', 0, runs_eoi - runs_scored_on_play))
+
+group_sum <- calc_roi_diff %>%
+  group_by(HalfID) %>%
+  summarize(runs_scored_inning = sum(runs_scored_on_play))
+
+rvm <- calc_roi_diff %>%
+  inner_join(group_sum) 
+
+rvm <- calc_roi_diff %>%
+  filter(outs != 3) %>%
+  mutate(state = paste(bases, outs, sep = " "))
+
+
+rvm_sub <- rvm %>%
+  group_by(HalfID) %>%
+  arrange(PlayID) %>%
+  subset(state != lag(state, 1))
+
+rvm_sub %>%
+  group_by(state) %>%
+  na.omit() %>%
+  summarize(x = mean(runs_roi)) -> rvm_sub
+
+base_order <- c("000 0", "000 1", "000 2", "100 0", "100 1", "100 2", "010 0", "010 1", "010 2", "001 0", "001 1", "001 2", "110 0", "110 1", "110 2", "101 0", "101 1", "101 2", "011 0", "011 1", "011 2", "111 0", "111 1", "111 2")
+
+rvm <- rvm_sub %>%
+  mutate(state = factor(x, levels = base_order)) %>%
+  arrange(state)
+
+run_val_mat <- matrix(round(rvm_sub$x, 2), 8, 3, byrow = TRUE)
+
+dimnames(run_val_mat)[[2]] <- c("0 outs", "1 out", "2 outs")
+dimnames(run_val_mat)[[1]] <- c("000", "100", "010", "001", "110", "101",
+"011", "111")
+
+```
+
