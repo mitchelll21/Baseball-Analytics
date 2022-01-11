@@ -121,7 +121,7 @@ calc_roi_diff <- run_fix %>%
 
 group_sum <- calc_roi_diff %>%
   group_by(HalfID) %>%
-  summarize(runs_scored_inning = sum(runs_scored_on_play))
+  summarise(runs_scored_inning = sum(runs_scored_on_play))
 
 rvm <- calc_roi_diff %>%
   inner_join(group_sum) 
@@ -139,19 +139,18 @@ rvm_sub <- rvm %>%
 rvm_sub %>%
   group_by(state) %>%
   na.omit() %>%
-  summarize(x = mean(runs_roi)) -> rvm_sub
+  summarise(x = mean(runs_roi)) -> rvm_sub
 
-base_order <- c("000 0", "000 1", "000 2", "100 0", "100 1", "100 2", "010 0", "010 1", "010 2", "001 0", "001 1", "001 2", "110 0", "110 1", "110 2", "101 0", "101 1", "101 2", "011 0", "011 1", "011 2", "111 0", "111 1", "111 2")
+base_order <- c("000 0", "000 1", "000 2", "100 0", "100 1", "100 2", "010 0", "010 1", "010 2", "110 0", "110 1", "110 2", "001 0", "001 1", "001 2", "101 0", "101 1", "101 2", "011 0", "011 1", "011 2", "111 0", "111 1", "111 2")
 
 rvm <- rvm_sub %>%
-  mutate(state = factor(x, levels = base_order)) %>%
+  mutate(state = factor(state, levels = base_order)) %>%
   arrange(state)
 
-run_val_mat <- matrix(round(rvm_sub$x, 2), 8, 3, byrow = TRUE)
+run_val_mat <- matrix(round(rvm$x, 2), 8, 3, byrow = TRUE)
 
 dimnames(run_val_mat)[[2]] <- c("0 outs", "1 out", "2 outs")
-dimnames(run_val_mat)[[1]] <- c("000", "100", "010", "001", "110", "101",
+dimnames(run_val_mat)[[1]] <- c("000", "100", "010", "110", "001", "101",
 "011", "111")
 
 ```
-
